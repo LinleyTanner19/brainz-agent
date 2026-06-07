@@ -33,6 +33,15 @@ class SyncPushPayload(BaseModel):
     content: str
     source: str = "mac-studio"
 
+class SyncDeletePayload(BaseModel):
+    file_path: str
+    source: str = "mac-studio"
+
+class SyncRenamePayload(BaseModel):
+    old_path: str
+    new_path: str
+    source: str = "mac-studio"
+
 class GraphQueryPayload(BaseModel):
     vertical: str
     question: str
@@ -79,6 +88,34 @@ def sync_push(payload: SyncPushPayload, _=Depends(require_auth)):
         "event_type":"updated","node_id":node_id,"source":payload.source}).execute()
     _regenerate_microagent(tenant_id)
     return {"status":"synced","node_id":node_id,"tenant":tenant_id,"title":title,"microagent_rebuilt":True}
+
+@app.post("/sync/delete")
+def sync_delete(payload: SyncDeletePayload, _=Depends(require_auth)):
+    res = supabase.table("commons_nodes").select("id,tenant_id").eq("file_path",payload.file_path).eq("is_active",True).limit(1).execute()
+    if not res.data: raise HTTPException(404, "No active node for file_path='"+payload.file_path+"'")
+    node_id = res.data[0]["id"]; tenant_id = res.data[0]["tenant_id"]
+    ts = datetime.utcnow().isoformat()
+    supabase.table("commons_nodes").update({"deleted_at":ts,"is_active":False,"updated_at":ts}).eq("id",node_id).execute()
+    # commons_edges uses from_node / to_node
+    supabase.table("commons_edges").update({"is_stale":True}).or_("from_node.eq."+node_id+",to_node.eq."+node_id).execute()
+    supabase.table("sync_log").insert({"tenant_id":tenant_id,"file_path":payload.file_path,
+        "event_type":"deleted","node_id":node_id,"source":payload.source}).execute()
+    _regenerate_microagent(tenant_id)
+    return {"status":"deleted","node_id":node_id,"tenant":tenant_id}
+
+@app.post("/sync/rename")
+def sync_rename(payload: SyncRenamePayload, _=Depends(require_auth)):
+    res = supabase.table("commons_nodes").select("id,tenant_id").eq("file_path",payload.old_path).eq("is_active",True).limit(1).execute()
+    if not res.data: raise HTTPException(404, "No active node for old_path='"+payload.old_path+"'")
+    node_id = res.data[0]["id"]; tenant_id = res.data[0]["tenant_id"]
+    conflict = supabase.table("commons_nodes").select("id").eq("file_path",payload.new_path).eq("is_active",True).limit(1).execute()
+    if conflict.data: raise HTTPException(409, "Active node already exists at new_path='"+payload.new_path+"'")
+    new_title = os.path.basename(payload.new_path).replace(".md","").title()
+    ts = datetime.utcnow().isoformat()
+    supabase.table("commons_nodes").update({"file_path":payload.new_path,"title":new_title,"updated_at":ts}).eq("id",node_id).execute()
+    supabase.table("sync_log").insert({"tenant_id":tenant_id,"file_path":payload.new_path,
+        "event_type":"renamed","node_id":node_id,"source":payload.source}).execute()
+    return {"status":"renamed","node_id":node_id,"old_path":payload.old_path,"new_path":payload.new_path}
 
 @app.post("/graph/query")
 def graph_query(payload: GraphQueryPayload, _=Depends(require_auth)):
