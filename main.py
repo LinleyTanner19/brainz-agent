@@ -523,10 +523,14 @@ async def benchmark(_=Depends(require_auth)):
 async def sync_push(payload: SyncPushPayload, background: BackgroundTasks, _=Depends(require_auth)):
     parts = payload.file_path.replace("\\", "/").split("/")
     tenant_id = "universal"
-    if "commons" in parts:
-        idx = parts.index("commons")
-        if idx + 1 < len(parts) and parts[idx + 1] in VERTICALS:
-            tenant_id = parts[idx + 1]
+    # Derive the vertical from the segment after a commons marker dir.
+    # Watchdog sends "intelligence-commons/<vertical>/..."; legacy sends "commons/<vertical>/...".
+    for _marker in ("intelligence-commons", "commons"):
+        if _marker in parts:
+            _idx = parts.index(_marker)
+            if _idx + 1 < len(parts) and parts[_idx + 1] in VERTICALS:
+                tenant_id = parts[_idx + 1]
+                break
     title_m = re.search(r"^# (.+)$", payload.content, re.MULTILINE)
     title = (title_m.group(1).strip() if title_m else
              os.path.basename(payload.file_path).replace(".md", "").title())
