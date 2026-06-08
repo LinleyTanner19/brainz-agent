@@ -47,6 +47,24 @@ if EMBED_KEY:
     except ImportError:
         pass
 
+# Summary LLM for /sync/push node summaries. Defaults to Anthropic (ANTHROPIC_API_KEY).
+# If SUMMARY_PROVIDER_KEY is set, route summaries through any OpenAI-compatible endpoint
+# instead (OpenRouter: https://openrouter.ai/api/v1 + anthropic/claude-3.5-haiku). This
+# lets the cloud generate summaries without a direct Anthropic key.
+_summary_client = None
+SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "")
+SUMMARY_KEY = os.environ.get("SUMMARY_PROVIDER_KEY", "")
+SUMMARY_URL = os.environ.get("SUMMARY_PROVIDER_URL", "")
+if SUMMARY_KEY:
+    try:
+        from openai import OpenAI as _OAI_S
+        _skw = {"api_key": SUMMARY_KEY}
+        if SUMMARY_URL:
+            _skw["base_url"] = SUMMARY_URL
+        _summary_client = _OAI_S(**_skw)
+    except ImportError:
+        pass
+
 try:
     from turbovec import IdMapIndex as _TurboIdMap
     _TURBOVEC_OK = True
@@ -93,6 +111,25 @@ def _embed(text: str) -> Optional[np.ndarray]:
     except Exception as exc:
         logger.warning("embed error: %s", exc)
         return None
+
+
+def _summarize(content: str, fallback: str) -> str:
+    """1-2 sentence node summary. Prefers SUMMARY_PROVIDER (OpenAI-compatible, e.g.
+    OpenRouter); falls back to Anthropic, then to the supplied fallback (title)."""
+    prompt = "Summarise in 1-2 sentences:\n\n" + content[:3000]
+    try:
+        if _summary_client and SUMMARY_MODEL:
+            r = _summary_client.chat.completions.create(
+                model=SUMMARY_MODEL, max_tokens=120,
+                messages=[{"role": "user", "content": prompt}])
+            return ((r.choices[0].message.content or "").strip() or fallback)
+        resp = ai.messages.create(
+            model="claude-haiku-4-5", max_tokens=120,
+            messages=[{"role": "user", "content": prompt}])
+        return resp.content[0].text.strip() or fallback
+    except Exception as exc:
+        logger.warning("summary error: %s", exc)
+        return fallback
 
 
 def _uuid_to_uint64(uuid_str: str) -> int:
@@ -498,14 +535,7 @@ async def sync_push(payload: SyncPushPayload, background: BackgroundTasks, _=Dep
                (parts[-2] if len(parts) > 2 else "general"))
     val_m = re.search(r"^validated: (.+)$", payload.content, re.MULTILINE)
     validated = val_m.group(1).strip() if val_m else "hypothesis"
-    try:
-        resp = ai.messages.create(
-            model="claude-haiku-4-5", max_tokens=120,
-            messages=[{"role": "user",
-                       "content": "Summarise in 1-2 sentences:\n\n" + payload.content[:3000]}])
-        summary = resp.content[0].text.strip()
-    except Exception:
-        summary = title
+    summary = _summarize(payload.content, title)
     embed_text = title + ". " + summary + ". " + payload.content[:500]
     embedding = _embed(embed_text)
     nd: dict = {
