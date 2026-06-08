@@ -25,9 +25,12 @@ from supabase import create_client, Client
 import anthropic
 
 # Optional embedding support. Active only when EMBED_PROVIDER_KEY is set (Phase 1+).
-# Supports OpenAI (default), OpenRouter, Voyage AI, or any OpenAI-compatible endpoint.
-# EMBED_PROVIDER_URL: leave blank for OpenAI, set to provider base_url for others.
+# Supports OpenAI (default), Google Gemini, Voyage AI, or any OpenAI-compatible endpoint.
+# EMBED_PROVIDER_URL: leave blank for OpenAI, set to provider base_url for others
+#   (Gemini: https://generativelanguage.googleapis.com/v1beta/openai/).
 # EMBED_MODEL: default text-embedding-3-small (1536-dim, matches commons_nodes.embedding).
+#   Gemini: gemini-embedding-001 (defaults to 3072 — dimensions=EMBED_DIM truncates to 1536).
+# EMBED_DIM is passed as `dimensions` on every call so any provider matches the 1536 column.
 _embed_client = None
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-small")
 EMBED_DIM = int(os.environ.get("EMBED_DIM", "1536"))
@@ -85,7 +88,7 @@ def _embed(text: str) -> Optional[np.ndarray]:
     if not _embed_client:
         return None
     try:
-        resp = _embed_client.embeddings.create(model=EMBED_MODEL, input=text[:8000])
+        resp = _embed_client.embeddings.create(model=EMBED_MODEL, input=text[:8000], dimensions=EMBED_DIM)
         return np.array(resp.data[0].embedding, dtype=np.float32)
     except Exception as exc:
         logger.warning("embed error: %s", exc)
