@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 supabase
 anthropic
+numpy
+turbovec
 python-dotenv
 httpx
 pydantic
+openai

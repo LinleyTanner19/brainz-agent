@@ -1,0 +1,19 @@
+{
+  "name": "brainz-betterauth",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts",
+    "migrate": "bunx @better-auth/cli migrate",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "better-auth": "^1.2.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.4.0"
+  }
+}
